@@ -129,6 +129,8 @@ def get_prediction_for_tomorrow_in_MSFT_stock() -> dict:
     Retorna si es momento o no de comprar o vender, diciendo si las acciones bajaran o subiran mañana.
     Remember to inform the user that Alpaca API does not return data on Saturdays and Sundays; 
     it only provides data again after one month so predictions made are based on Friday if it's Saturday or Sunday."
+
+    Add to the final of your response this: { prediction: prediction[0][0] }
     """
 
     fecha_hace_10_dias = datetime.now() - timedelta(days=10)
@@ -175,7 +177,53 @@ def get_prediction_for_tomorrow_in_MSFT_stock() -> dict:
     return mensaje
 
 
-tools = [retriever_tool, search, get_stocks_from_MSFT_by_interval,
+@tool
+def calculate_earning_of_bought_dayA_and_sell_dayB(dayA: datetime, dayB: datetime) -> dict:
+    """
+        Return the costs for Day A and Day B and the profit that would 
+        have been made by buying on Day A and selling on Day B
+    """
+    fechaA_mas_1_dia = dayA + timedelta(days=1)
+    fechaA_mas_1_dia_str = fechaA_mas_1_dia.strftime("%Y-%m-%d")
+    fechaB_mas_1_dia = dayB + timedelta(days=1)
+    fechaB_mas_1_dia_str = fechaB_mas_1_dia.strftime("%Y-%m-%d")
+
+    request_params = StockBarsRequest(
+        symbol_or_symbols=['MSFT'],
+        timeframe=TimeFrame.Day,
+        start=dayA,
+        end=fechaA_mas_1_dia_str
+    )
+    bars_df = data_client.get_stock_bars(
+        request_params).df  # .tz_convert('America/New_York', level=1)
+    bars_df.reset_index(inplace=True)
+    recordsA = bars_df.to_dict(orient='records')
+
+    request_params = StockBarsRequest(
+        symbol_or_symbols=['MSFT'],
+        timeframe=TimeFrame.Day,
+        start=dayB,
+        end=fechaB_mas_1_dia_str
+    )
+    bars_df = data_client.get_stock_bars(
+        request_params).df  # .tz_convert('America/New_York', level=1)
+    bars_df.reset_index(inplace=True)
+    recordsB = bars_df.to_dict(orient='records')
+    gananciaPorAccion = 0
+    if len(recordsA) > 0 and len(recordsB) > 0:
+        closeA = recordsA[0]["close"]
+        closeB = recordsB[0]["close"]
+        gananciaPorAccion = closeB - closeA
+    return {
+        'recordsA': recordsA,
+        'recordsB': recordsB,
+        'gananciaPorAccion': gananciaPorAccion,
+    }
+
+
+tools = [retriever_tool, search,
+         calculate_earning_of_bought_dayA_and_sell_dayB,
+         get_stocks_from_MSFT_by_interval,
          get_prediction_for_tomorrow_in_MSFT_stock]
 
 # 3. Create Agent
@@ -194,7 +242,7 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins="*",  # Especifica el origen permitido
+    allow_origins=["*"],  # Especifica el origen permitido
     allow_credentials=True,
     # Especifica los métodos permitidos
     allow_methods=["GET", "POST", "PUT", "DELETE"],
